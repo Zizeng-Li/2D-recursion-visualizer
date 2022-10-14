@@ -1,0 +1,145 @@
+This is a link of the program
+https://macoutreach.rocks/share/3f460fea
+
+myShapes model = [ openPolygon
+( List.take (round <| 30000 * model.sliderValue)
+(newPoints (model.sliderValue*15) [(0,0),(30,0)]) )
+|> outlined (solid 0.1) green
+|> scale 3.5
+|> move (-50,20)
+|> move model.pan
+, rect 184 120 |> ghost
+|> notifyMouseDownAt MouseDownAt
+|> notifyMouseMoveAt MouseMoveAt
+|> notifyLeave MouseLeave
+|> notifyMouseUp MouseUp
+, slider 120 (0,1) SliderDown SliderMove SliderUp model.sliderValue model.sliderState
+|> move (90,0)
+, text (String.fromInt (floor (15 * model.sliderValue)) |> String.left 5)
+|> filled black
+|> move (30,-50)
+]
+
+newPoint (x0,y0) (x1,y1) offset =
+let (ax,ay) = ((x1 + x0) / 2.0, (y1+y0) / 2.0)
+(bx,by) = ((ax - x0), (ay-y0))
+(cx,cy) = (offset * by, offset * (-bx))
+in (x0 + bx + cx, y0 + by + cy)
+
+recursive : List (Float,Float) -> List(Float,Float)
+recursive xs =
+case xs of
+[]->[]
+[(x0,y0)] -> [(x0,y0)]
+[(x0,y0),(x1,y1)] -> (x0,y0) :: newPoint (x0,y0) (x1,y1) (1) :: [(x1,y1)]
+(x0,y0)::(x1,y1)::(x2,y2)::other -> (x0,y0) :: newPoint (x0,y0) (x1,y1) (1)
+:: (x1,y1)
+:: newPoint (x1,y1) (x2,y2) (-1)
+:: recursive ((x2,y2)::other)
+
+newPoints n point = if n < 1 then point
+else
+recursive point |> newPoints (n-1)
+
+slider : Float -> (Float,Float)
+-> (Float -> Msg)
+-> (Float -> Msg)
+-> Msg
+-> Float
+-> SliderState
+-> Shape Msg
+slider height (minValue,maxValue) downMsg moveMsg stopMsg currentValue state =
+let
+background = roundedRect 4 height 2
+|> filled (rgb 200 200 255)
+highlightedHeight =
+if maxValue-minValue < 0.0001 then
+0
+else
+currentValue / (maxValue-minValue) * height
+
+-- "do" the calculation for the slider value, here in the "view"
+mouseDownMsg : (Float,Float) -> Msg
+mouseDownMsg (x,y) = downMsg ((y + 0.5 * height / (maxValue-minValue) )
+/ height * (maxValue-minValue))
+
+mouseMoveMsg : (Float,Float) -> Msg
+mouseMoveMsg (x,y) = ((y + 0.5 * height / (maxValue-minValue) )
+/ height * (maxValue-minValue))
+|> moveMsg
+
+in
+group
+[ background
+, rect 4 highlightedHeight
+|> filled (rgb 0 0 255)
+|> move (0,(height - highlightedHeight) * (-0.5))
+|> clip background
+, rect 8 height |> filled (rgba 0 0 0 0.01)
+]
+|> ( case state of
+SliderWaiting -> notifyMouseDownAt mouseDownMsg
+SliderDragging ->
+( notifyMouseMoveAt mouseMoveMsg
+>> notifyMouseUp stopMsg
+>> notifyLeave stopMsg
+)
+)
+
+type Msg
+= Tick Float GetKeyState
+| MouseDownAt (Float,Float)
+| MouseMoveAt (Float,Float)
+| MouseLeave
+| MouseUp
+| SliderDown Float
+| SliderMove Float
+| SliderUp
+
+type SliderState
+= SliderWaiting
+| SliderDragging
+
+type MouseState
+= Waiting
+| MouseDownLast (Float,Float)
+
+update msg model
+= case msg of
+Tick t (keyQuery,_,_) ->
+{ model | time = t, isZooming = Down == keyQuery Shift }
+MouseDownAt pos ->
+{ model | mouseState = MouseDownLast pos }
+MouseLeave ->
+{ model | mouseState = Waiting }
+MouseUp ->
+{ model | mouseState = Waiting }
+MouseMoveAt (x,y) ->
+case model.mouseState of
+MouseDownLast (xLast,yLast) ->
+case model.isZooming of
+True -> { model | zoom = model.zoom * ( 1 + (y-yLast)/64.0 )
+, mouseState = MouseDownLast (x,y)
+}
+False -> {model | pan = let (xOld,yOld) = model.pan
+in ( xOld + (x-xLast)/model.zoom
+, yOld + (y-yLast)/model.zoom
+)
+, mouseState = MouseDownLast (x,y)
+}
+Waiting -> model
+SliderMove value ->
+{ model | sliderValue = value }
+SliderDown value ->
+{ model | sliderState = SliderDragging, sliderValue = value }
+SliderUp ->
+{ model | sliderState = SliderWaiting }
+
+init = { time = 0
+, pan = (0,0)
+, zoom = 1
+, isZooming = False
+, mouseState = Waiting
+, sliderState = SliderWaiting
+, sliderValue = 0.5
+}
